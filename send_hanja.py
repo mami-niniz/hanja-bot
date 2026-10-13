@@ -31,6 +31,14 @@ TOKEN = (os.environ.get("TELEGRAM_TOKEN") or "").strip()
 CHAT_ID = (os.environ.get("CHAT_ID") or "").strip()
 START_DATE = (os.environ.get("START_DATE") or "2026-10-14").strip()
 REVIEW_ON_SUNDAY = (os.environ.get("REVIEW_ON_SUNDAY") or "true").strip().lower() != "false"
+
+# 오늘 배울 한자를 어떻게 도드라지게 보여줄지 정합니다.
+# (텔레그램은 글자 크기 조절을 지원하지 않아 아래 방법 중 하나를 씁니다)
+#   'quote' : 왼쪽에 굵은 세로줄이 생기는 인용구 + 굵게 + 밑줄   <- 추천(가장 눈에 띔)
+#   'box'   : 회색 배경 상자(코드 블록) + 굵게
+#   'mark'  : 화살표로 감싸기  👉 一 (일) 한 일 👈  + 굵게 + 밑줄
+#   'bold'  : 그냥 굵게만
+HANJA_STYLE = (os.environ.get("HANJA_STYLE") or "quote").strip().lower()
 MODE = (os.environ.get("MODE") or "normal").strip().lower()
 KST = timezone(timedelta(hours=9))
 
@@ -475,12 +483,22 @@ def build_card(c, n):
     """오늘의 한자 카드 (텔레그램 HTML 서식)"""
     h, e, m = esc(c["h"]), esc(c["e"]), esc(c["m"])
     sent = hi(esc(c["s"]), c["h"])
+    line = "%s  (%s)   %s" % (h, e, m)
+    label = "🎯 <b>오늘 배울 한자</b>\n"
+    if HANJA_STYLE == "bold":
+        head = "🎯 <b>%s  (%s)  %s</b>" % (h, e, m)
+    elif HANJA_STYLE == "mark":
+        head = "🎯 <b>오늘 배울 한자</b>\n<b><u>👉 %s  (%s)  %s 👈</u></b>" % (h, e, m)
+    elif HANJA_STYLE == "box":
+        head = label + "<pre><b>%s</b></pre>" % line
+    else:  # 'quote' (기본)
+        head = label + "<blockquote><b><u>%s</u></b></blockquote>" % line
+
     return "\n".join([
         "📖 <b>오늘의 한자</b>  ·  <b>%d일차</b>" % n,
         "━━━━━━━━━━━━━━━",
         "",
-        "🎯 <b>%s</b>  <i>(%s)</i>" % (h, e),
-        "　　%s" % m,
+        head,
         "",
         "✏️ <b>예시 단어</b>",
         "　• <b>%s</b> · %s" % (esc(c["w1"]), esc(c["w1k"])),
