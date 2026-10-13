@@ -1,0 +1,21 @@
+name: 한자 시험 발송
+
+# 이 워크플로는 'test' 모드로만 실행됩니다.
+# Actions 탭 -> 왼쪽 '한자 시험 발송' -> Run workflow -> Run workflow (끝)
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 내려받기
+        uses: actions/checkout@v4
+
+      - name: 한자 시험 발송
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          MODE: test
+        run: python3 send_hanja.py
