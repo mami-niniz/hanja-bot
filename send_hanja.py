@@ -421,6 +421,19 @@ def log(msg=""):
     print(msg, flush=True)
 
 
+def write_summary(md):
+    """GitHub Actions 의 'Summary' 화면에 큰 글씨로 결과를 보여줍니다.
+    (로그를 펼치지 않아도 바로 보입니다)"""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fp:
+            fp.write(md + "\n")
+    except OSError:
+        pass
+
+
 def tg_api(method, params=None, get=False):
     """텔레그램 Bot API 호출. 실패해도 예외를 던지지 않고 dict 로 돌려줍니다."""
     if not TOKEN:
@@ -474,10 +487,15 @@ def cmd_chatid():
     res = tg_api("getUpdates", get=True)
     log("=== 텔레그램 API 응답 ===")
     log(json.dumps(res, ensure_ascii=False))
+
     if not res.get("ok"):
         log("")
         log("오류: TELEGRAM_TOKEN 값이 틀렸습니다. BotFather 가 준 토큰을 다시 확인하세요.")
+        write_summary("## ❌ 토큰이 틀렸습니다\n\n`TELEGRAM_TOKEN` Secret 값을 "
+                      "BotFather 가 준 토큰과 다시 대조하세요.\n\n```\n"
+                      + json.dumps(res, ensure_ascii=False, indent=1) + "\n```")
         return
+
     updates = res.get("result") or []
     if not updates:
         log("")
@@ -486,18 +504,39 @@ def cmd_chatid():
         log(" 2) 그룹방에서 '/start@봇아이디' 를 보냈는지  (그냥 /start 는 봇에게 전달되지 않습니다)")
         log(" 3) BotFather -> /setprivacy -> 봇 선택 -> Disable 후, 봇을 그룹에서 내보냈다가 다시 초대")
         log(" 4) 위 2번을 다시 한 뒤 이 작업을 다시 실행")
+        write_summary(
+            "## ⚠️ chat_id 를 찾지 못했습니다 (결과가 비어 있음)\n\n"
+            "봇이 그룹방 메시지를 받지 못한 상태입니다. 순서대로 해보세요.\n\n"
+            "1. 그룹방에서 **`/start@봇아이디`** 를 다시 보냅니다 (그냥 `/start` 는 봇에게 전달되지 않습니다)\n"
+            "2. 텔레그램 BotFather -> `/setprivacy` -> 봇 선택 -> **Disable**\n"
+            "3. 봇을 그룹에서 **내보냈다가 다시 초대** 합니다\n"
+            "4. 그룹방에 아무 메시지나 한 번 보냅니다\n"
+            "5. **Actions -> 매일 한자 발송 -> Run workflow -> chatid** 를 다시 실행합니다"
+        )
         return
+
     log("")
     log("=== 발견된 chat_id ===")
+    rows = []
     for u in updates:
         m = (u.get("message") or u.get("edited_message") or u.get("channel_post")
              or u.get("my_chat_member") or u.get("chat_member") or u.get("chat_join_request"))
         if m and m.get("chat"):
             c = m["chat"]
-            log("  chat_id = %s   |   이름: %s   |   종류: %s" % (
-                c.get("id"), c.get("title") or c.get("username") or c.get("first_name"), c.get("type")))
+            name = c.get("title") or c.get("username") or c.get("first_name") or ""
+            log("  chat_id = %s   |   이름: %s   |   종류: %s" % (c.get("id"), name, c.get("type")))
+            rows.append((c.get("id"), name, c.get("type")))
+
     log("")
     log("그룹방은 -100 으로 시작하는 숫자입니다. 그 값을 GitHub Secrets 의 CHAT_ID 에 넣으세요.")
+
+    md = ["## ✅ 발견된 chat_id", "", "| chat_id | 이름 | 종류 |", "|---|---|---|"]
+    for cid, name, kind in rows:
+        md.append("| `%s` | %s | %s |" % (cid, name, kind))
+    md += ["", "**위 표의 `-100...` 숫자를 복사해서** "
+               "Settings -> Secrets and variables -> Actions -> **New repository secret** -> "
+               "Name 에 `CHAT_ID`, Secret 에 붙여넣기 하세요."]
+    write_summary("\n".join(md))
 
 
 def main():
@@ -526,6 +565,7 @@ def main():
     if MODE == "dry":
         log("=== 발송 미리보기 (실제로 보내지 않음) ===")
         log(text)
+        write_summary("## 미리보기 (발송하지 않았습니다)\n\n```\n" + text + "\n```")
         return
 
     if not CHAT_ID:
@@ -543,8 +583,12 @@ def main():
         log("발송에 실패했습니다. 위 응답의 description 을 확인하세요.")
         log("chat not found  -> CHAT_ID 오타 또는 봇이 그룹에서 나간 상태")
         log("Unauthorized    -> TELEGRAM_TOKEN 오타")
+        write_summary("## ❌ 발송 실패\n\n```\n"
+                      + json.dumps(res, ensure_ascii=False, indent=1) + "\n```\n\n"
+                      "`chat not found` -> CHAT_ID 오타 / `Unauthorized` -> TELEGRAM_TOKEN 오타")
         sys.exit(1)
     log("발송 완료!")
+    write_summary("## ✅ 발송 완료\n\n```\n" + text + "\n```")
 
 
 if __name__ == "__main__":
