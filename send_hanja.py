@@ -19,6 +19,7 @@
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -421,6 +422,19 @@ def log(msg=""):
     print(msg, flush=True)
 
 
+def write_summary(md):
+    """GitHub Actions 의 'Summary' 화면에 큰 글씨로 결과를 보여줍니다.
+    (로그를 펼치지 않아도 바로 보입니다)"""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fp:
+            fp.write(md + "\n")
+    except OSError:
+        pass
+
+
 def tg_api(method, params=None, get=False):
     """텔레그램 Bot API 호출. 실패해도 예외를 던지지 않고 dict 로 돌려줍니다."""
     if not TOKEN:
@@ -442,31 +456,52 @@ def tg_api(method, params=None, get=False):
             return {"ok": False, "error_code": e.code, "raw": body}
 
 
+def esc(t):
+    """텔레그램 HTML 서식에서 특수문자를 안전하게 처리합니다."""
+    return (str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def strip_tags(t):
+    """미리보기용 - 서식 태그를 제거합니다."""
+    return re.sub(r"<[^>]+>", "", t)
+
+
+def hi(text, key):
+    """문장 안의 오늘 한자를 굵게 표시합니다."""
+    return text.replace(esc(key), "<b>%s</b>" % esc(key))
+
+
 def build_card(c, n):
+    """오늘의 한자 카드 (텔레그램 HTML 서식)"""
+    h, e, m = esc(c["h"]), esc(c["e"]), esc(c["m"])
+    sent = hi(esc(c["s"]), c["h"])
     return "\n".join([
-        "[%d일차] 오늘의 한자" % n,
+        "📖 <b>오늘의 한자</b>  ·  <b>%d일차</b>" % n,
+        "━━━━━━━━━━━━━━━",
         "",
-        "%s  (%s)" % (c["h"], c["e"]),
-        "훈음 : %s" % c["m"],
+        "🎯 <b>%s</b>  <i>(%s)</i>" % (h, e),
+        "　　%s" % m,
         "",
-        "▪ 예시 단어",
-        "   %s (%s)" % (c["w1"], c["w1k"]),
-        "   %s (%s)" % (c["w2"], c["w2k"]),
+        "✏️ <b>예시 단어</b>",
+        "　• <b>%s</b> · %s" % (esc(c["w1"]), esc(c["w1k"])),
+        "　• <b>%s</b> · %s" % (esc(c["w2"]), esc(c["w2k"])),
         "",
-        "▪ 예문",
-        "   %s" % c["s"],
-        "   → %s" % c["t"],
+        "📝 <b>예문</b>",
+        "　%s" % sent,
+        "　↳ %s" % esc(c["t"]),
     ])
 
 
 def build_review(data, day):
-    lines = ["지난 7일 한자 복습", ""]
+    """일요일 - 지난 7일 복습 (텔레그램 HTML 서식)"""
+    lines = ["🔄 <b>지난 7일 한자 복습</b>", "━━━━━━━━━━━━━━━", ""]
     for i in range(6, -1, -1):
         if day - i < 0:
             continue
         c = data[(day - i) % len(data)]
-        lines.append("· %s (%s) %s   - %s(%s)" % (c["h"], c["e"], c["m"], c["w1"], c["w1k"]))
-    lines += ["", "오늘 하루도 화이팅입니다."]
+        lines.append("• <b>%s</b> <i>(%s)</i> %s" % (esc(c["h"]), esc(c["e"]), esc(c["m"])))
+        lines.append("　　%s · %s" % (esc(c["w1"]), esc(c["w1k"])))
+    lines += ["", "💪 오늘 하루도 화이팅입니다!"]
     return "\n".join(lines)
 
 
@@ -474,10 +509,15 @@ def cmd_chatid():
     res = tg_api("getUpdates", get=True)
     log("=== 텔레그램 API 응답 ===")
     log(json.dumps(res, ensure_ascii=False))
+
     if not res.get("ok"):
         log("")
         log("오류: TELEGRAM_TOKEN 값이 틀렸습니다. BotFather 가 준 토큰을 다시 확인하세요.")
+        write_summary("## ❌ 토큰이 틀렸습니다\n\n`TELEGRAM_TOKEN` Secret 값을 "
+                      "BotFather 가 준 토큰과 다시 대조하세요.\n\n```\n"
+                      + json.dumps(res, ensure_ascii=False, indent=1) + "\n```")
         return
+
     updates = res.get("result") or []
     if not updates:
         log("")
@@ -486,18 +526,43 @@ def cmd_chatid():
         log(" 2) 그룹방에서 '/start@봇아이디' 를 보냈는지  (그냥 /start 는 봇에게 전달되지 않습니다)")
         log(" 3) BotFather -> /setprivacy -> 봇 선택 -> Disable 후, 봇을 그룹에서 내보냈다가 다시 초대")
         log(" 4) 위 2번을 다시 한 뒤 이 작업을 다시 실행")
+        write_summary(
+            "## ⚠️ chat_id 를 찾지 못했습니다 (결과가 비어 있음)\n\n"
+            "봇이 그룹방 메시지를 받지 못한 상태입니다. 순서대로 해보세요.\n\n"
+            "1. 그룹방에서 **`/start@봇아이디`** 를 다시 보냅니다 (그냥 `/start` 는 봇에게 전달되지 않습니다)\n"
+            "2. 텔레그램 BotFather -> `/setprivacy` -> 봇 선택 -> **Disable**\n"
+            "3. 봇을 그룹에서 **내보냈다가 다시 초대** 합니다\n"
+            "4. 그룹방에 아무 메시지나 한 번 보냅니다\n"
+            "5. **Actions -> 매일 한자 발송 -> Run workflow -> chatid** 를 다시 실행합니다"
+        )
         return
+
     log("")
     log("=== 발견된 chat_id ===")
+    rows = []
     for u in updates:
         m = (u.get("message") or u.get("edited_message") or u.get("channel_post")
              or u.get("my_chat_member") or u.get("chat_member") or u.get("chat_join_request"))
         if m and m.get("chat"):
             c = m["chat"]
-            log("  chat_id = %s   |   이름: %s   |   종류: %s" % (
-                c.get("id"), c.get("title") or c.get("username") or c.get("first_name"), c.get("type")))
+            name = c.get("title") or c.get("username") or c.get("first_name") or ""
+            log("  chat_id = %s   |   이름: %s   |   종류: %s" % (c.get("id"), name, c.get("type")))
+            rows.append((c.get("id"), name, c.get("type")))
+
     log("")
-    log("그룹방은 -100 으로 시작하는 숫자입니다. 그 값을 GitHub Secrets 의 CHAT_ID 에 넣으세요.")
+    log("위 '종류: group' 또는 'supergroup' 인 줄의 숫자를 GitHub Secrets 의 CHAT_ID 에 넣으세요.")
+    log("(로그에서 *** 로 보이면 이미 CHAT_ID 가 등록된 것입니다 - GitHub 이 값을 가려서 표시한 것입니다)")
+
+    md = ["## ✅ 발견된 chat_id", "", "| chat_id | 이름 | 종류 |", "|---|---|---|"]
+    for cid, name, kind in rows:
+        md.append("| `%s` | %s | %s |" % (cid, name, kind))
+    md += ["", "**표에서 `종류` 가 group 또는 supergroup 인 줄의 숫자를 복사해서** "
+               "Settings -> Secrets and variables -> Actions -> **New repository secret** -> "
+               "Name 에 `CHAT_ID`, Secret 에 붙여넣기 하세요.",
+               "",
+               "> 값이 `***` 로 보이면 이미 CHAT_ID 가 등록된 것입니다. "
+               "(GitHub 이 로그에서 Secret 값을 자동으로 가립니다)"]
+    write_summary("\n".join(md))
 
 
 def main():
@@ -508,6 +573,7 @@ def main():
     data = load_data()
 
     today = datetime.now(KST).date()
+    log("실행 모드: %s" % MODE)
     log("오늘(한국시간): %s" % today.isoformat())
 
     if MODE == "test":
@@ -517,6 +583,12 @@ def main():
         day = (today - date(y, m, d)).days
         if day < 0:
             log("아직 시작일(%s) 전입니다. 오늘은 보내지 않습니다." % START_DATE)
+            write_summary(
+                "## ⏸ 오늘은 보내지 않았습니다 (시작일 전)\n\n"
+                "현재 모드: **%s**\n\n"
+                "시작일은 `%s` 입니다. 오늘이 그보다 앞이라 아무것도 보내지 않았습니다.\n\n"
+                "**지금 바로 시험 발송을 하려면** 모드를 **`test`** 로 바꿔 다시 실행하세요."
+                % (MODE, START_DATE))
             return
         if REVIEW_ON_SUNDAY and today.weekday() == 6:
             text = build_review(data, day)
@@ -525,7 +597,8 @@ def main():
 
     if MODE == "dry":
         log("=== 발송 미리보기 (실제로 보내지 않음) ===")
-        log(text)
+        log(strip_tags(text))
+        write_summary("## 미리보기 (발송하지 않았습니다)\n\n```\n" + text + "\n```")
         return
 
     if not CHAT_ID:
@@ -534,8 +607,17 @@ def main():
     res = tg_api("sendMessage", {
         "chat_id": CHAT_ID,
         "text": text,
+        "parse_mode": "HTML",
         "disable_web_page_preview": "true",
     })
+    # 서식 파싱 문제로 실패하면 서식 없이 한 번 더 시도합니다.
+    if not res.get("ok") and "parse" in str(res.get("description", "")).lower():
+        log("HTML 서식이 거부되어 일반 텍스트로 다시 시도합니다.")
+        res = tg_api("sendMessage", {
+            "chat_id": CHAT_ID,
+            "text": strip_tags(text),
+            "disable_web_page_preview": "true",
+        })
     log("=== 텔레그램 응답 ===")
     log(json.dumps(res, ensure_ascii=False))
     if not res.get("ok"):
@@ -543,8 +625,12 @@ def main():
         log("발송에 실패했습니다. 위 응답의 description 을 확인하세요.")
         log("chat not found  -> CHAT_ID 오타 또는 봇이 그룹에서 나간 상태")
         log("Unauthorized    -> TELEGRAM_TOKEN 오타")
+        write_summary("## ❌ 발송 실패\n\n```\n"
+                      + json.dumps(res, ensure_ascii=False, indent=1) + "\n```\n\n"
+                      "`chat not found` -> CHAT_ID 오타 / `Unauthorized` -> TELEGRAM_TOKEN 오타")
         sys.exit(1)
     log("발송 완료!")
+    write_summary("## ✅ 발송 완료\n\n```\n" + text + "\n```")
 
 
 if __name__ == "__main__":
