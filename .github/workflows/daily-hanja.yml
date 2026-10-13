@@ -1,0 +1,34 @@
+name: 매일 한자 발송
+
+on:
+  schedule:
+    - cron: '10 23 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '실행 모드'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - chatid
+          - normal
+          - dry
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 내려받기
+        uses: actions/checkout@v4
+
+      - name: 한자 발송
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          START_DATE: '2026-10-14'
+          REVIEW_ON_SUNDAY: 'true'
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'normal' }}
+        run: python3 send_hanja.py
