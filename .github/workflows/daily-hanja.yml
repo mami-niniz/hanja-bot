@@ -1,8 +1,13 @@
 name: 매일 한자 발송
 
+# 예약 실행은 GitHub 사정으로 늦거나 건너뛸 수 있어,
+# 아침 시간대에 3번 걸어두고 '하루 한 번만' 보내도록 했습니다.
+# (한 번 성공하면 나머지 시간대는 자동으로 건너뜁니다)
 on:
   schedule:
-    - cron: '10 23 * * *'
+    - cron: '50 22 * * *'   # 한국시간 07:50
+    - cron: '20 23 * * *'   # 한국시간 08:20
+    - cron: '50 23 * * *'   # 한국시간 08:50
   workflow_dispatch:
     inputs:
       mode:
@@ -11,10 +16,13 @@ on:
         default: 'test'
         type: choice
         options:
-          - test
-          - chatid
-          - normal
-          - dry
+          - test     # 1번 한자를 지금 바로 보냅니다
+          - normal   # 오늘 날짜의 한자를 보냅니다 (강제 발송)
+          - chatid   # 그룹방 chat_id 를 찾습니다
+          - dry      # 발송하지 않고 내용만 봅니다
+
+permissions:
+  contents: write      # 발송 기록(last_sent.txt)을 저장하기 위해 필요
 
 jobs:
   send:
@@ -31,4 +39,17 @@ jobs:
           START_DATE: '2026-10-14'
           REVIEW_ON_SUNDAY: 'true'
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'normal' }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
         run: python3 send_hanja.py
+
+      - name: 발송 기록 저장
+        run: |
+          if [ -n "$(git status --porcelain last_sent.txt)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add last_sent.txt
+            git commit -m "chore: 발송 기록 $(date -u +%F)"
+            git push || { git pull --rebase --autostash && git push; }
+          else
+            echo "기록 변화 없음 (이미 발송했거나 시험 발송)"
+          fi
